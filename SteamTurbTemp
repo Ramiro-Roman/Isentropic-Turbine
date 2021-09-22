@@ -1,0 +1,98 @@
+Public Function SteamTurbTemp(Pin As Double, Pout As Double, eta As Double, Optional Tin As Double = -273.15, Optional DT As Double = 0.001, Optional maxite As Integer = 100, Optional tol As Double = 0.000001)
+'Calculates the Discharge Temperature of a Steam Turbine
+'-----------------------------------------------------
+'Pin         [=] Suction Pressure in bar
+'Pout        [=] Discharge Pressure in bar
+'eta         [=] Turbine Efficiency
+'Tin         [=] Optional: Suction Temperature in C
+'DT          [=] Optional: Perturbation step size
+'maxite      [=] Optional: Maximum number of iterations
+'tol         [=] Optional: Numerical convergence tolerance
+'SteamTurbTemp [=] Calculated Values: Discharge Temperature, Quality, Power
+'-----------------------------------------------------
+Dim Hin As Double, Sin As Double
+Dim SteamTurbValues(1 To 3)
+
+If Tin = -273.15 Then 'Case for if the inlet temperature is not provided; Will assume Tsat
+Tin = WaterTsat(Pin)
+Hin = HSteam(, Pin, "v")
+Sin = SSteam(, Pin, "v")
+Else
+Hin = HSteam(Tin, Pin)
+Sin = SSteam(Tin, Pin)
+End If
+
+Dim T0 As Double, Sv As Double, SL As Double, H0 As Double, S0 As Double, T_ideal As Double, CP0 As Double 'H0,S0 are the ideal Enthalpy and Entropies
+Dim i As Integer
+T0 = WaterTsat(Pout) 'Initial guess for the outlet temperature
+Sv = SSteam(, Pout, "v")
+
+'Calculate Ideal Vapor Quality
+'-----------------------------
+If (Sin < Sv) Then
+    SL = SSteam(, Pout, "l")
+    Dim xnew As Double
+    xnew = (Sin - SL) / (Sv - SL) 'Ideal Quality
+    
+    H0 = xnew * HSteam(, Pout, "v") + (1 - xnew) * HSteam(, Pout, "l")
+    S0 = xnew * SSteam(, Pout, "v") + (1 - xnew) * SSteam(, Pout, "l")
+    T_ideal = T0
+    
+'Start the Newton Algorithm for Ideal Discharge Temperature
+'----------------------------------------------------------
+ElseIf (Sin > Sv) Then
+    Dim f0 As Double
+    S0 = SSteam(T0, Pout, "v")
+    CP0 = CpSteam(T0, Pout, "v")
+    f0 = S0 - Sin
+    
+    For i = 1 To maxite
+        T_ideal = T0 - f0 / CP0 * (T0 + 273.15)
+        If (Abs(T_ideal - T0) <= tol) Then Exit For
+        T0 = T_ideal
+        S0 = SSteam(T0, Pout, "v")
+        CP0 = CpSteam(T0, Pout, "v")
+        f0 = S0 - Sin
+    Next i
+    H0 = HSteam(T0, Pout)
+    T_ideal = T0
+    xnew = 1
+End If
+'Proceed in Calculating Power Requirements
+'-----------------------------------------
+Dim power As Double, Hout As Double, T_Actual As Double, H2Actual As Double, Hvout As Double
+Hout = HSteam(T_ideal, Pout)
+Hvout = HSteam(, Pout, "v")
+power = (H0 - Hin) * eta
+f0 = (Hout - Hin) - power
+CP0 = CpSteam(T_ideal, Pout)
+H2Actual = power + Hin 'The correct enthalpy value in the outlet
+
+'Start Calculations for Actual Conditions
+'----------------------------------------------------
+If (Hvout > H2Actual) Then
+    xnew = (H2Actual - HSteam(, Pout, "l")) / (Hvout - HSteam(, Pout, "l"))
+    T_Actual = T0
+    
+ElseIf (Hvout < H2Actual) Then
+For i = 1 To maxite
+    T_Actual = T_ideal - f0 / CP0
+    If (Abs(T_Actual - T_ideal) <= tol) Then Exit For
+    T_ideal = T_Actual
+    Hout = HSteam(T_ideal, Pout)
+    f0 = (Hout - Hin) - power
+    CP0 = CpSteam(T_ideal, Pout)
+Next i
+xnew = 1
+End If
+
+SteamTurbValues(1) = T_Actual
+SteamTurbValues(2) = xnew
+SteamTurbValues(3) = power
+
+If (i < maxite) Then
+  SteamTurbTemp = SteamTurbValues
+ Else
+  SteamTurbTemp = " #VALUE!"
+End If
+End Function
